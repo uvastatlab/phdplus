@@ -2,10 +2,10 @@
 # phdplus - Spring 2019
 # Clay Ford: clayford@virginia.edu
 
+library(tidyverse)
 library(effects)
 library(ggeffects)
 library(scales)
-library(tidyverse)
 library(stargazer)
 
 
@@ -35,23 +35,30 @@ homes$city <- droplevels(homes$city)
 # model home totalvalue by city and finsqft
 mod_lm <- lm(totalvalue ~ city + finsqft + fullbath, data = homes)
 summary(mod_lm)
-coef(mod_lm)
 
 # Interpretation: 
 
-# Expected value of home increases about $277 for each additional square foot.
+# Expected value of home increases about $259 for each additional square foot.
 
-# Expected value of home increases about $26517 for each additional full bath.
-
-# Intercept is the expected value of a home in Charlottesville with 0 finished
-# square feet and 0 full baths. Not very useful. 
+# Expected value of home increases about $26,517 for each additional full bath.
 
 # The coefficients of the other cities represent the difference in expected home
 # value from Charlottesville.
 
+# Intercept is the expected value of a home in Charlottesville with 0 finished
+# square feet and 0 full baths. Not very useful. 
+
+# Let's look at the default effect plots
+plot(allEffects(mod_lm), rug = FALSE)
+
 # An effect plot for "city" can help us visualize and understand the differences
 # in expected home values between cities.
 plot(Effect("city", mod_lm))
+
+# It appears expected home values in Crozet and Earlysville may be significantly
+# different. How could we "test" that? What about all pairise differences?
+# See "Appendix: Comparisons of factors in model"
+
 
 # An effect plot for "finsqft" and "fullbath" is just a straight line since the
 # effects are linear. The model assumes the effects of finsqft and fullbath are
@@ -94,8 +101,8 @@ summary(mod_nle)
 termplot(mod_nle, terms = "poly(finsqft, 3)", 
          partial.resid = TRUE, smooth = panel.smooth)
 
-# Another approach might involve splines. See Appendix. But we'll stick with the
-# polynomial.
+# Another approach might involve splines. See Appendix: using natural splines
+# for non-linearity. But we'll stick with the polynomial.
 
 # The extra terms appear justified
 anova(mod_le, mod_nle) # Null: smaller model is as good as larger model
@@ -142,10 +149,9 @@ ggplot(effDF, aes(x = finsqft, y = fit)) +
 
 # Update y-axis to be labeled on original scale.
 
-# First define "pretty" breaks for y axis
-yaxs <- pretty(range(exp(c(effDF$lower, effDF$upper))))
-
-# Or the tidyverse method using pipes: 
+# First define "pretty" breaks for y axis. This takes all the lower and upper CI
+# values, transforms back to original scale, finds the largest and smallest
+# values, and creates a "pretty" range of values
 yaxs <- c(effDF$lower, effDF$upper) %>% exp() %>% range() %>% pretty()
 
 # now create same effect plot but with update y-axis
@@ -343,6 +349,62 @@ ggplot(eDF, aes(x = lotsize, y = fit)) +
 
 
 
+# Appendix: comparisons of factors in model -------------------------------
+
+# Recall the following model and plot
+summary(mod_lm)
+plot(Effect("city", mod_lm))
+
+# Are the expected home values between Crozet and Earlysville significantly
+# different? One way to answer that using the existing model is the
+# linearHypothesis function in the car package.
+
+# We simply set the coefficient names equal to one another. The null of the
+# hypothesis test is that coefficients for CROZET and EARLYSVILLE are the same.
+library(car)
+linearHypothesis(mod_lm, "cityCROZET = cityEARLYSVILLE")
+
+# We could also test the null that both CROZET and EARLYSVILLE, and CROZET and
+# KESWICK, have the same coefficients.
+linearHypothesis(mod_lm, c("cityCROZET = cityEARLYSVILLE",
+                           "cityCROZET = cityKESWICK"))
+
+# For all pairwise comparisons, we can use Tukey's test available in the
+# multcomp package. Use the glht() function which stands for General Linear
+# Hypotheses Test. The first argument is our model. The second argument is the
+# linear function to be tested. We set city equal to "Tukey" and wrap in the
+# mcp() function, which stands for multiple comparisons.
+library(multcomp)
+comp.out <- glht(mod_lm, linfct = mcp(city = "Tukey"))
+
+# The summary reveals that 7 out of the 15 possible comparisons appear to be
+# significantly different. Notice these comparisons use adjusted p-values that
+# take into account the multiple hypothesis tests. 
+summary(comp.out)
+
+# Wheresas previously Crozet and Earlysville appeared significantly different,
+# they no longer appear significantly different when considered 1 of 15
+# different hypothesis tests.
+
+# multcomp provides a plotting method to visualize the comparisons along with
+# the confidence intervals of the differences.
+plot(comp.out)
+
+# The labels are too big for the margin. An easy fix is to just create the plot
+# ourselves using ggplot. First get the confidence intervals and then convert to
+# a data frame.
+c.out <- confint(comp.out)
+ciDF <- as.data.frame(c.out$confint)
+ciDF$city <- rownames(ciDF)
+ggplot(ciDF, aes(x = reorder(city, Estimate), y = Estimate)) +
+  geom_point() +
+  geom_errorbar(aes(ymin = lwr, ymax = upr), width = 0.2) +
+  geom_hline(yintercept = 0, linetype = "dashed") +
+  scale_y_continuous(breaks = seq(-60000,60000,20000)) +
+  coord_flip()
+
+
+
 # Appendix: using natural splines for non-linearity -----------------------
 
 # We can model nonlinear effects with natural splines. Splines are piecewise
@@ -373,6 +435,8 @@ m2 <- lm(y ~ ns(x, 4))
 lines(x, sin(x), col = "black")                     # the "true" line
 lines(x, fitted(m1), col = "red", lty = 2)          # spline
 lines(x, fitted(m2), col = "blue", lty = 2)         # polynomial
+legend("bottomright", legend = c("poly", "ns"), 
+       col = c("red", "blue"), lty = 2)
 
 # Notice how the polynomial deviates from the true line at the turns and in the
 # extremes.
@@ -655,3 +719,5 @@ head(as.data.frame(geff.out2))
 # the package and click "User guides, package vignettes and other documentation"
 # to review them.
 help(package = "ggeffects")
+
+
